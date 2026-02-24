@@ -20,3 +20,8 @@ export interface SemanticScholarSearchResponse {
     next?: number;
     data: SemanticScholarPaper[];
 }
+
+export interface PaperSummary {
+    key_insights: string[];
+    abstract_analysis: string;
+}

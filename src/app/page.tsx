@@ -5,7 +5,8 @@ import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { Search, BookOpen, Clock, Users, Quote, ChevronRight, X, ArrowUpRight, Flame, Library, Network, History } from 'lucide-react';
 import { Playfair_Display } from 'next/font/google';
 import { searchPapers } from '@/lib/api/semanticScholar';
-import { SemanticScholarPaper } from '@/lib/types';
+import { summarizePaper } from '@/lib/api/gemini';
+import { SemanticScholarPaper, PaperSummary } from '@/lib/types';
 
 const playfair = Playfair_Display({ subsets: ['latin'], style: ['normal', 'italic'], weight: ['400', '700'] });
 
@@ -61,6 +62,10 @@ export default function LanternApp() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Gemini AI State
+  const [isSummarizing, setIsSummarizing] = useState(false);
+  const [aiSummary, setAiSummary] = useState<PaperSummary | null>(null);
+
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       setMousePosition({ x: e.clientX, y: e.clientY });
@@ -76,6 +81,8 @@ export default function LanternApp() {
     setIsLoading(true);
     setError(null);
     setSelectedPaper(null);
+    setAiSummary(null);
+    setIsSummarizing(false);
 
     try {
       const results = await searchPapers(searchQuery);
@@ -122,6 +129,35 @@ export default function LanternApp() {
       setPapers(MOCK_PAPERS);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handlePaperSelection = async (paper: MappedPaper) => {
+    setSelectedPaper(paper);
+
+    // Only attempt to summarize if we haven't already and there is an abstract
+    if (paper.abstract && paper.abstract !== 'No abstract available for this paper.') {
+      setIsSummarizing(true);
+      setAiSummary(null); // Clear previous
+      try {
+        const summary = await summarizePaper(paper.title, paper.abstract);
+        setAiSummary(summary);
+      } catch (err) {
+        console.error("Gemini summarizing failed:", err);
+        // Fallback to basic mapped insights if Gemini fails
+        setAiSummary({
+          key_insights: paper.insights,
+          abstract_analysis: paper.abstract
+        });
+      } finally {
+        setIsSummarizing(false);
+      }
+    } else {
+      // Fallback for missing abstracts
+      setAiSummary({
+        key_insights: ["Abstract missing. AI analysis impossible."],
+        abstract_analysis: "The source text is missing."
+      });
     }
   };
 
@@ -366,7 +402,7 @@ export default function LanternApp() {
                         <motion.div
                           variants={itemVariants}
                           key={paper.id}
-                          onClick={() => setSelectedPaper(paper)}
+                          onClick={() => handlePaperSelection(paper)}
                           className={`relative group cursor-pointer rounded-2xl border transition-all duration-400 overflow-hidden ${isSelected
                             ? 'bg-[#141414] border-amber-500/30 shadow-[0_10px_40px_-10px_rgba(245,158,11,0.15)] ring-1 ring-amber-500/20 scale-[1.01] z-10'
                             : 'bg-[#101010] border-zinc-800/60 hover:border-zinc-700 hover:bg-[#121212] hover:shadow-xl'
@@ -455,37 +491,63 @@ export default function LanternApp() {
                       </div>
 
                       <div className="space-y-12">
-                        <section>
-                          <h4 className="text-sm font-semibold text-zinc-100 uppercase tracking-widest mb-5 flex items-center">
-                            <span className="w-8 h-[1px] bg-amber-500/50 mr-3"></span>
-                            Key Insights Extraction
-                          </h4>
-                          <div className="bg-[#141414]/50 border border-zinc-800/50 rounded-2xl p-6 shadow-inner">
-                            <ul className="space-y-4">
-                              {selectedPaper.insights.map((insight, idx) => (
-                                <li key={idx} className="flex items-start text-zinc-300 group">
-                                  <div className="mt-1 mr-4 bg-amber-500/20 rounded-full p-1 group-hover:bg-amber-500/30 transition-colors">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.8)]"></div>
-                                  </div>
-                                  <span className="leading-relaxed text-base font-light">{insight}</span>
-                                </li>
-                              ))}
-                            </ul>
+                        {isSummarizing ? (
+                          // AI Reading Assistant Skeleton
+                          <div className="animate-pulse space-y-12">
+                            <section>
+                              <div className="h-4 w-48 bg-amber-500/20 rounded mb-6"></div>
+                              <div className="bg-[#141414]/50 border border-zinc-800/50 rounded-2xl p-6 space-y-4">
+                                <div className="h-3 bg-zinc-800/60 rounded w-full"></div>
+                                <div className="h-3 bg-zinc-800/60 rounded w-5/6"></div>
+                                <div className="h-3 bg-zinc-800/60 rounded w-4/5"></div>
+                              </div>
+                            </section>
+                            <section>
+                              <div className="h-4 w-40 bg-amber-500/20 rounded mb-6"></div>
+                              <div className="space-y-3">
+                                <div className="h-3 bg-zinc-800/40 rounded w-full"></div>
+                                <div className="h-3 bg-zinc-800/40 rounded w-full"></div>
+                                <div className="h-3 bg-zinc-800/40 rounded w-3/4"></div>
+                              </div>
+                            </section>
                           </div>
-                        </section>
+                        ) : aiSummary ? (
+                          <>
+                            <section>
+                              <h4 className="text-sm font-semibold text-zinc-100 uppercase tracking-widest mb-5 flex items-center">
+                                <span className="w-8 h-[1px] bg-amber-500/50 mr-3"></span>
+                                Key Insights Extraction
+                              </h4>
+                              <div className="bg-[#141414]/50 border border-zinc-800/50 rounded-2xl p-6 shadow-inner relative overflow-hidden">
+                                {/* Subtle inner glow for AI insights */}
+                                <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 blur-[50px] rounded-full pointer-events-none"></div>
+                                <ul className="space-y-4 relative z-10">
+                                  {aiSummary.key_insights.map((insight, idx) => (
+                                    <li key={idx} className="flex items-start text-zinc-300 group">
+                                      <div className="mt-1 mr-4 bg-amber-500/20 rounded-full p-1 group-hover:bg-amber-500/30 transition-colors">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.8)]"></div>
+                                      </div>
+                                      <span className="leading-relaxed text-base font-light">{insight}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            </section>
 
-                        <section>
-                          <h4 className="text-sm font-semibold text-zinc-100 uppercase tracking-widest mb-5 flex items-center">
-                            <span className="w-8 h-[1px] bg-amber-500/50 mr-3"></span>
-                            Abstract Analysis
-                          </h4>
-                          <p className="text-zinc-400 leading-relaxed text-base font-light">
-                            {selectedPaper.abstract}
-                            <span className="inline-flex items-center justify-center ml-2 border-b border-amber-500/30 text-amber-500/80 hover:text-amber-400 hover:border-amber-400 cursor-pointer transition-all pb-0.5">
-                              Reveal full text <ArrowUpRight size={14} className="ml-1" />
-                            </span>
-                          </p>
-                        </section>
+                            <section>
+                              <h4 className="text-sm font-semibold text-zinc-100 uppercase tracking-widest mb-5 flex items-center">
+                                <span className="w-8 h-[1px] bg-amber-500/50 mr-3"></span>
+                                Abstract Analysis
+                              </h4>
+                              <p className="text-zinc-400 leading-relaxed text-base font-light">
+                                {aiSummary.abstract_analysis}
+                                <span className="inline-flex items-center justify-center ml-2 border-b border-amber-500/30 text-amber-500/80 hover:text-amber-400 hover:border-amber-400 cursor-pointer transition-all pb-0.5">
+                                  Request deeply detailed synthesis <ArrowUpRight size={14} className="ml-1" />
+                                </span>
+                              </p>
+                            </section>
+                          </>
+                        ) : null}
                       </div>
                     </div>
 
