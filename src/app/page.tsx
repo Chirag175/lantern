@@ -1,18 +1,13 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { Search, BookOpen, Clock, Users, Quote, ChevronRight, X, ArrowUpRight, Flame, Library, Network, History } from 'lucide-react';
 import { Playfair_Display } from 'next/font/google';
+import { searchPapers } from '@/lib/api/semanticScholar';
+import { SemanticScholarPaper } from '@/lib/types';
 
 const playfair = Playfair_Display({ subsets: ['latin'], style: ['normal', 'italic'], weight: ['400', '700'] });
-
-const MOCK_PAPERS = [
-  { id: 1, title: 'Attention Is All You Need', authors: 'Vaswani et al.', year: 2017, citations: 124000, abstract: 'The dominant sequence transduction models are based on complex recurrent or convolutional neural networks...', insights: ['Introduced the Transformer architecture.', 'Self-attention mechanism replaces recurrence.', 'Highly parallelizable.'] },
-  { id: 2, title: 'BERT: Pre-training of Deep Bidirectional Transformers', authors: 'Devlin et al.', year: 2018, citations: 89000, abstract: 'We introduce a new language representation model called BERT, which stands for Bidirectional Encoder Representations from Transformers...', insights: ['Bidirectional context modeling.', 'Masked Language Modeling objective.', 'State-of-the-art on 11 NLP tasks.'] },
-  { id: 3, title: 'Language Models are Few-Shot Learners', authors: 'Brown et al.', year: 2020, citations: 52000, abstract: 'We demonstrate that scaling up language models greatly improves task-agnostic, few-shot performance, sometimes even reaching competitiveness with prior state-of-the-art fine-tuning approaches...', insights: ['Introduced GPT-3 (175B parameters).', 'In-context learning without fine-tuning.', 'Emergent abilities at scale.'] },
-  { id: 4, title: 'Chinchilla: Training Compute-Optimal Large Language Models', authors: 'Hoffmann et al.', year: 2022, citations: 2100, abstract: 'We investigate the optimal model size and number of tokens for training a transformer language model under a given compute budget...', insights: ['Model size and training data should scale equally.', 'Provided new scaling laws.', 'Chinchilla (70B) outperforms Gopher (280B).'] },
-];
 
 const CURATED_COLLECTIONS = [
   "Theoretical Physics",
@@ -20,6 +15,13 @@ const CURATED_COLLECTIONS = [
   "Cognitive Science",
   "Quantum Computing",
   "Ancient Philosophy"
+];
+
+const MOCK_PAPERS = [
+  { id: 'mock-1', title: 'Attention Is All You Need', authors: 'Vaswani et al.', year: 2017, citations: 124000, abstract: 'The dominant sequence transduction models are based on complex recurrent or convolutional neural networks...', insights: ['Introduced the Transformer architecture.', 'Self-attention mechanism replaces recurrence.', 'Highly parallelizable.'] },
+  { id: 'mock-2', title: 'BERT: Pre-training of Deep Bidirectional Transformers', authors: 'Devlin et al.', year: 2018, citations: 89000, abstract: 'We introduce a new language representation model called BERT, which stands for Bidirectional Encoder Representations from Transformers...', insights: ['Bidirectional context modeling.', 'Masked Language Modeling objective.', 'State-of-the-art on 11 NLP tasks.'] },
+  { id: 'mock-3', title: 'Language Models are Few-Shot Learners', authors: 'Brown et al.', year: 2020, citations: 52000, abstract: 'We demonstrate that scaling up language models greatly improves task-agnostic, few-shot performance, sometimes even reaching competitiveness with prior state-of-the-art fine-tuning approaches...', insights: ['Introduced GPT-3 (175B parameters).', 'In-context learning without fine-tuning.', 'Emergent abilities at scale.'] },
+  { id: 'mock-4', title: 'Chinchilla: Training Compute-Optimal Large Language Models', authors: 'Hoffmann et al.', year: 2022, citations: 2100, abstract: 'We investigate the optimal model size and number of tokens for training a transformer language model under a given compute budget...', insights: ['Model size and training data should scale equally.', 'Provided new scaling laws.', 'Chinchilla (70B) outperforms Gopher (280B).'] },
 ];
 
 // Animation variants for stagger effects
@@ -38,13 +40,28 @@ const itemVariants: Variants = {
   show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
 };
 
+export type MappedPaper = {
+  id: string;
+  title: string;
+  authors: string;
+  year: number | string;
+  citations: number;
+  abstract: string;
+  insights: string[];
+};
+
 export default function LanternApp() {
   const [query, setQuery] = useState('');
   const [view, setView] = useState<'landing' | 'dashboard'>('landing');
-  const [selectedPaper, setSelectedPaper] = useState<typeof MOCK_PAPERS[0] | null>(null);
+  const [selectedPaper, setSelectedPaper] = useState<MappedPaper | null>(null);
   const [mousePosition, setMousePosition] = useState({ x: -1000, y: -1000 });
 
-  React.useEffect(() => {
+  // API State
+  const [papers, setPapers] = useState<MappedPaper[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       setMousePosition({ x: e.clientX, y: e.clientY });
     };
@@ -52,11 +69,65 @@ export default function LanternApp() {
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
+  const executeSearch = async (searchQuery: string) => {
+    if (!searchQuery.trim()) return;
+
+    setView('dashboard');
+    setIsLoading(true);
+    setError(null);
+    setSelectedPaper(null);
+
+    try {
+      const results = await searchPapers(searchQuery);
+
+      const mappedResults: MappedPaper[] = results.map(paper => {
+        // Format authors
+        let authorString = 'Unknown Authors';
+        if (paper.authors && paper.authors.length > 0) {
+          authorString = paper.authors.length <= 3
+            ? paper.authors.map(a => a.name).join(', ')
+            : `${paper.authors[0].name} et al.`;
+        }
+
+        // Generate mock insights if abstract exists, else generic
+        let insights = ['No detailed insights available for this paper.'];
+        if (paper.abstract) {
+          insights = [
+            `Discusses concepts related to "${searchQuery}".`,
+            'Proposes novel methodologies in the field.',
+            'Contributes to the broader understanding of the topic.'
+          ];
+        }
+
+        return {
+          id: paper.paperId || Math.random().toString(),
+          title: paper.title || 'Untitled Paper',
+          authors: authorString,
+          year: paper.year || 'N/A',
+          citations: paper.citationCount || 0,
+          abstract: paper.abstract || 'No abstract available for this paper.',
+          insights
+        };
+      });
+
+      setPapers(mappedResults);
+    } catch (err: any) {
+      console.error(err);
+      if (err.message === 'RATE_LIMIT') {
+        setError('Semantic Scholar API rate limit reached (too many requests). Falling back to cached library records.');
+      } else {
+        setError('Failed to retrieve knowledge. The archives are currently inaccessible. Displaying offline records.');
+      }
+      // Provide fallback mock data so the app remains usable and the UI looks good
+      setPapers(MOCK_PAPERS);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (query.trim()) {
-      setView('dashboard');
-    }
+    executeSearch(query);
   };
 
   return (
@@ -140,7 +211,7 @@ export default function LanternApp() {
                     {CURATED_COLLECTIONS.map((collection, idx) => (
                       <button
                         key={idx}
-                        onClick={() => { setQuery(collection); setView('dashboard'); }}
+                        onClick={() => { setQuery(collection); executeSearch(collection); }}
                         className="px-5 py-2 rounded-full border border-zinc-700 text-zinc-400 text-sm hover:text-amber-400 hover:border-amber-500/50 hover:bg-amber-500/5 transition-all duration-300 transform hover:-translate-y-0.5"
                       >
                         {collection}
@@ -245,18 +316,51 @@ export default function LanternApp() {
                         {query ? `Synthesis for "${query}"` : "Recent Echoes"}
                       </h3>
                       <p className="text-zinc-500 font-light">
-                        {MOCK_PAPERS.length} volumes found in the repository
+                        {isLoading ? 'Searching the archives...' : `${papers.length} volumes found in the repository`}
                       </p>
                     </div>
                   </motion.div>
 
+                  {error && (
+                    <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 mb-8">
+                      {error}
+                    </div>
+                  )}
+
                   <motion.div
+                    key={isLoading ? 'loading' : 'results'}
                     variants={containerVariants}
                     initial="hidden"
                     animate="show"
                     className="space-y-4"
                   >
-                    {MOCK_PAPERS.map((paper) => {
+                    {isLoading ? (
+                      // Skeleton Loaders
+                      [1, 2, 3, 4].map((i) => (
+                        <motion.div
+                          key={`skeleton-${i}`}
+                          className="p-6 pl-8 rounded-2xl bg-[#101010] border border-zinc-800/40 relative overflow-hidden"
+                        >
+                          <motion.div
+                            className="absolute inset-0 bg-gradient-to-r from-transparent via-amber-500/5 to-transparent -translate-x-full"
+                            animate={{ translateX: ['-100%', '200%'] }}
+                            transition={{ repeat: Infinity, duration: 1.5, ease: "linear", delay: i * 0.1 }}
+                          />
+                          <div className="flex justify-between items-start gap-4 mb-4">
+                            <div className="h-6 bg-zinc-800/50 rounded w-2/3"></div>
+                            <div className="flex gap-2">
+                              <div className="h-6 w-12 bg-zinc-800/50 rounded"></div>
+                              <div className="h-6 w-16 bg-zinc-800/50 rounded"></div>
+                            </div>
+                          </div>
+                          <div className="h-4 bg-zinc-800/30 rounded w-1/3 mb-5"></div>
+                          <div className="space-y-2">
+                            <div className="h-3 bg-zinc-800/20 rounded w-full"></div>
+                            <div className="h-3 bg-zinc-800/20 rounded w-5/6"></div>
+                          </div>
+                        </motion.div>
+                      ))
+                    ) : papers.map((paper) => {
                       const isSelected = selectedPaper?.id === paper.id;
                       return (
                         <motion.div
